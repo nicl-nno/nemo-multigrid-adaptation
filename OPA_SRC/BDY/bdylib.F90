@@ -27,7 +27,7 @@ MODULE bdylib
 
    PUBLIC   bdy_orlanski_2d     ! routine called in bdytra.f90
    PUBLIC   bdy_orlanski_3d     ! routine called in bdytra.f90
-   PUBLIC   bdy_orlanski_3d_frs_mod ! routine called in bdytra.f90
+   PUBLIC   bdy_adv_frs_mod ! routine called in bdytra.f90
    PUBLIC   bdy_adv ! routine called in bdytra.f90
 
    !!----------------------------------------------------------------------
@@ -357,7 +357,7 @@ CONTAINS
 
    END SUBROUTINE bdy_orlanski_3d
    
-   SUBROUTINE bdy_orlanski_3d_frs_mod( idx, igrd, phib, phia, phi_ext, ll_npo ) !(ADDED AH 30.06.2017)
+   SUBROUTINE bdy_adv_frs_mod( idx, igrd, phib, phia, phi_ext ) !(ADDED AH 30.06.2017)
       !!----------------------------------------------------------------------
       !!                 ***  SUBROUTINE bdy_orlanski_3d_frs_mod  ***
       !!             
@@ -373,7 +373,6 @@ CONTAINS
       REAL(wp), DIMENSION(:,:,:), INTENT(in)     ::   phib     ! model before 3D field
       REAL(wp), DIMENSION(:,:,:), INTENT(inout)  ::   phia     ! model after 3D field (to be updated)
       REAL(wp), DIMENSION(:,:),   INTENT(in)     ::   phi_ext  ! external forcing data
-      LOGICAL,                    INTENT(in)     ::   ll_npo   ! switch for NPO version
 
       INTEGER  ::   jb, jk,ib,bcoord                              ! dummy loop indices
       INTEGER  ::   ii, ij, iibm1, iibm2, ijbm1, ijbm2     ! 2D addresses
@@ -489,6 +488,9 @@ CONTAINS
             !
             ! update boundary value:
             zrx = zdt * zdx / ( zex1 * znor2 )
+			IF (zrx>0) then 
+			zrx=zrx+(rdt/zex2)*ub(ii,ij,jk) ! u should have same dimension (i.e. be dimensionless) as zrx in order to be added 
+			endif
 !!$            zrx = min(zrx,2.0_wp)
             zout = sign( 1., zrx )
             zout = 0.5*( zout + abs(zout) )
@@ -513,9 +515,9 @@ CONTAINS
 
       IF( nn_timing == 1 ) CALL timing_stop('bdy_orlanski_3d')
 
-   END SUBROUTINE bdy_orlanski_3d_frs_mod
+   END SUBROUTINE bdy_adv_frs_mod
    
-      SUBROUTINE bdy_adv( idx, igrd, phib, phia, phi_ext,ll_frs) !Added AH 03.07.2017 (Modifed 25.07)
+      SUBROUTINE bdy_adv( idx, igrd, phib, phia, phi_ext) !Added AH 03.07.2017 (Modifed 25.07)
       !!----------------------------------------------------------------------
       !!                 ***  SUBROUTINE bdy_adv  ***
       !!             
@@ -531,7 +533,6 @@ CONTAINS
       REAL(wp), DIMENSION(:,:,:), INTENT(in)     ::   phib     ! model before 3D field
       REAL(wp), DIMENSION(:,:,:), INTENT(inout)  ::   phia     ! model after 3D field (to be updated)
       REAL(wp), DIMENSION(:,:),   INTENT(in)     ::   phi_ext  ! external forcing data
-      LOGICAL,                    INTENT(in)     ::   ll_frs   ! switch for NPO version
 
       INTEGER  ::   jb, jk,ib                                 ! dummy loop indices
       INTEGER  ::   ii, ij, iibm1, iibm2, ijbm1, ijbm2     ! 2D addresses

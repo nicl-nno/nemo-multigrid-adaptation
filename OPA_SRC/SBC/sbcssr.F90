@@ -47,17 +47,31 @@ MODULE sbcssr
    INTEGER, PUBLIC ::   nn_ssir         ! SSI restoring indicator
    INTEGER, PUBLIC ::   nn_sssr         ! SST/SSS restoring indicator
    REAL(wp)        ::   rn_dqdt         ! restoring factor on SST and SSS
-   REAL(wp)        ::   rn_dqdi         ! restoring factor on SSI
-   REAL(wp)        ::   rn_dqdi_freez   ! restoring factor on SSI
+   
+   REAL(wp)        ::   rn_dqdi_melt         ! restoring factor on SSI concentration melting
+   REAL(wp)        ::   rn_dqdi_freez   ! restoring factor on SSI concentration freezing
+   
+   REAL(wp)        ::   rn_dqdi_thick_melt   ! restoring factor on SSI thickness melting
+   REAL(wp)        ::   rn_dqdi_thick_freez   ! restoring factor on SSI thickness freezing
+   
+   
    REAL(wp)        ::   rn_deds         ! restoring factor on SST and SSS
    LOGICAL         ::   ln_sssr_bnd     ! flag to bound erp term 
    REAL(wp)        ::   rn_sssr_bnd     ! ABS(Max./Min.) value of erp term [mm/day]
+   
+   REAL(wp) :: ice_resto
 
    REAL(wp) , ALLOCATABLE, DIMENSION(:) ::   buffer   ! Temporary buffer for exchange
    TYPE(FLD), ALLOCATABLE, DIMENSION(:) ::   sf_sst   ! structure of input SST (file informations, fields read)
    TYPE(FLD), ALLOCATABLE, DIMENSION(:) ::   sf_ssi   ! structure of input SSI (file informations, fields read)
-   TYPE(FLD), ALLOCATABLE, DIMENSION(:) ::   sf_ssit  ! structure of input SSI (file informations, fields read)
+   TYPE(FLD), ALLOCATABLE, DIMENSION(:) ::   sf_ssit  ! structure of input SSIT (file informations, fields read)
+   TYPE(FLD), ALLOCATABLE, DIMENSION(:) ::   sf_ssit_error  ! structure of input SSIT error (file informations, fields read)
+
    TYPE(FLD), ALLOCATABLE, DIMENSION(:) ::   sf_sss   ! structure of input SSS (file informations, fields read)
+   TYPE(FLD), ALLOCATABLE, DIMENSION(:) ::   sf_resto  ! structure of input resto mask (file informations, fields read)
+
+   
+
 
    !! * Substitutions
 #  include "domzgr_substitute.h90"
@@ -92,7 +106,7 @@ CONTAINS
       INTEGER  ::   ierror   ! return error code
       !!
       CHARACTER(len=100) ::  cn_dir          ! Root directory for location of ssr files
-      TYPE(FLD_N) ::   sn_sst, sn_sss, sn_ssi,sn_ssit        ! informations about the fields to be read
+      TYPE(FLD_N) ::   sn_sst, sn_sss, sn_ssi,sn_ssit,sn_resto        ! informations about the fields to be read
       !!----------------------------------------------------------------------
       !
       IF( nn_timing == 1 )  CALL timing_start('sbc_ssr')
@@ -124,8 +138,11 @@ CONTAINS
       IF( nn_sstr + nn_sssr + nn_ssir /= 0 ) THEN
          !
          IF( nn_sstr == 1)   CALL fld_read( kt, nn_fsbc, sf_sst )   ! Read SST data and provides it at kt
-		 IF( nn_ssir == 1)   CALL fld_read( kt, nn_fsbc, sf_ssi )   ! Read SST data and provides it at kt
-		 IF( nn_ssir == 1)   CALL fld_read( kt, nn_fsbc, sf_ssit )   ! Read SST data and provides it at kt
+		 IF( nn_ssir == 1)   CALL fld_read( kt, nn_fsbc, sf_ssi )   ! Read SSI data and provides it at kt
+		 IF( nn_ssir == 1)   CALL fld_read( kt, nn_fsbc, sf_ssit )   ! Read SSIT data and provides it at kt
+		 IF( nn_ssir == 1)   CALL fld_read( kt, nn_fsbc, sf_ssit_error)   ! Read SST data and provides it at kt
+
+		 IF( nn_ssir == 1)   CALL fld_read( kt, nn_fsbc, sf_resto )   ! Read SST data and provides it at kt
          IF( nn_sssr >= 1)   CALL fld_read( kt, nn_fsbc, sf_sss )   ! Read SSS data and provides it at kt
          !
          !                                         ! ========================= !
@@ -190,40 +207,38 @@ CONTAINS
 
   
   !!---------------------------------------------------------------------
-      !!                     ***  ROUTINE sbc_ssr  ***
-      !!
-      !! ** Purpose :   Add to heat and/or freshwater fluxes a damping term
-      !!                toward observed SST and/or SSS.
-      !!
-      !! ** Method  : - Read namelist namsbc_ssr
-      !!              - Read observed SST and/or SSS
-      !!              - at each nscb time step
-      !!                   add a retroaction term on qns    (nn_sstr = 1)
-      !!                   add a damping term on sfx        (nn_sssr = 1)
-      !!                   add a damping term on emp        (nn_sssr = 2)
+      !!                     ***  ROUTINE sbc_ssr_ice  ***
+     
       !!---------------------------------------------------------------------
       INTEGER, INTENT(in   ) ::   kt   ! ocean time step
       !!
       INTEGER  ::   ji, jj   ! dummy loop indices
       REAL(wp) ::   zqrp_melt     ! local scalar for heat flux damping
       REAL(wp) ::   icethic_temporary,icethi    ! local scalar for ice thickness sum over categories
-	  REAL(wp) ::   zqrp_freez, tmp_thic_diff     ! local scalar for heat flux damping
+	  REAL(wp) ::   ice_conc_diff,abs_ice_conc_diff 
+	  REAL(wp) ::   zqrp_freez, tmp_thic_diff,thic_error    ! local scalar for heat flux damping
       INTEGER  ::   ierror   ! return error code
       !!
       CHARACTER(len=100) ::  cn_dir          ! Root directory for location of ssr files
-      TYPE(FLD_N) ::   sn_ssi,sn_ssit        ! informations about the fields to be read
+      TYPE(FLD_N) ::   sn_ssi,sn_ssit,sn_resto        ! informations about the fields to be read
 	  
 	  
       !!----------------------------------------------------------------------
       !
-      IF( nn_timing == 1 )  CALL timing_start('sbc_ssr')
 	  
+	  
+      IF( nn_timing == 1 )  CALL timing_start('sbc_ssr_ice')
+	  
+	  !WRITE(*,*) 'ICE REST'
 # if defined key_lim3
       !
       IF( nn_ssir /= 0 ) THEN
          !
-		 IF( nn_ssir == 1)   CALL fld_read( kt, nn_fsbc, sf_ssi )   ! Read SSI data and provides it at kt
-		 IF( nn_ssir == 1)   CALL fld_read( kt, nn_fsbc, sf_ssit )   ! Read SSI data and provides it at kt
+		 IF( nn_ssir == 1)   CALL fld_read( kt, nn_fsbc, sf_ssi )   ! Read SSI conc data and provides it at kt
+		 IF( nn_ssir == 1)   CALL fld_read( kt, nn_fsbc, sf_ssit )   ! Read SSI thinckness data and provides it at kt
+		 IF( nn_ssir == 1)   CALL fld_read( kt, nn_fsbc, sf_ssit_error )   ! Read SSI thinckness error data and provides it at kt
+		 IF( nn_ssir == 1)   CALL fld_read( kt, nn_fsbc, sf_resto )   ! Read SST data and provides it at kt
+
          !
          !                                         ! ========================= !
          IF( MOD( kt-1, nn_fsbc ) == 0 ) THEN      !    Add restoring term     !
@@ -231,39 +246,57 @@ CONTAINS
             !
 
 			
-			IF( nn_ssir == 1 ) THEN                                   !* Ice concentration restoring term
-               DO jj = 1, jpj
-                  DO ji = 1, jpi
-						IF (sf_ssi(1)%fnow(ji,jj,1) == sf_ssi(1)%fnow(ji,jj,1)) THEN !If conectration reanalysis value not NAN
-							IF (ABS((( fr_i(ji,jj) - sf_ssi(1)%fnow(ji,jj,1) )*100.0)) > 10.0 .AND. (fr_i(ji,jj) - sf_ssi(1)%fnow(ji,jj,1) )*100.0>0.0 ) THEN !if ice must be melted
-								 zqrp_melt = rn_dqdi * ( fr_i(ji,jj) - sf_ssi(1)%fnow(ji,jj,1) )*100.0
-								 qsr_ice(ji,jj,:) = qsr_ice(ji,jj,:) + zqrp_melt
+			IF( nn_ssir == 1 ) THEN  !* Ice concentration restoring term
+			   DO jj = 1, jpj
+				  DO ji = 1, jpi
+				  
+				  ice_conc_diff=((( fr_i(ji,jj) - sf_ssi(1)%fnow(ji,jj,1)/100 )*100.0))
+				  abs_ice_conc_diff=ABS(ice_conc_diff)
+
+				  
+					! If conentration reanalysis value not NAN
+					ice_resto=sf_resto(1)%fnow(ji,jj,1)
+					
+					IF (sf_ssi(1)%fnow(ji,jj,1) == sf_ssi(1)%fnow(ji,jj,1)) THEN 
+						IF (abs_ice_conc_diff > 10.0 .AND. ice_conc_diff>0.0 ) THEN !if ice must be melted
+							 zqrp_melt = rn_dqdi_melt * ice_conc_diff
+							 qsr_ice(ji,jj,:) = qsr_ice(ji,jj,:) + zqrp_melt*ice_resto
+						ENDIF
+						
+						IF (abs_ice_conc_diff > 5.0 .AND. ice_conc_diff<0.0 ) THEN !if ice must be freezed
+							zqrp_freez = rn_dqdi_freez * ice_conc_diff
+							qns_oce (ji,jj)= qns_oce (ji,jj) + zqrp_freez*ice_resto
+						ENDIF
+					ENDIF
+					
+					IF (sf_ssit(1)%fnow(ji,jj,1) == sf_ssit(1)%fnow(ji,jj,1) .AND. (sf_ssit(1)%fnow(ji,jj,1)>0.01)) THEN!If thickness reanalysis value not NAN
+							icethic_temporary = SUM(ht_i(ji,jj,:)*a_i_b(ji,jj,:))
+							
+							tmp_thic_diff = ((icethic_temporary - sf_ssit(1)%fnow(ji,jj,1) ))
+							thic_error=sf_ssit_error(1)%fnow(ji,jj,1)/2
+							!WRITE(*,*) "Thic_error",ji,jj,thic_error,tmp_thic_diff,sf_ssit(1)%fnow(ji,jj,1)
+							IF (ABS(thic_error)<0.1 .OR. (thic_error .NE. thic_error) .OR. (thic_error<0.01)) THEN 
+								thic_error=0.1 
 							ENDIF
 							
-							IF (ABS((( fr_i(ji,jj) - sf_ssi(1)%fnow(ji,jj,1) )*100.0)) > 5.0 .AND. (fr_i(ji,jj) - sf_ssi(1)%fnow(ji,jj,1) )*100.0<0.0 ) THEN !if ice must be freezed
-								zqrp_freez = rn_dqdi_freez * ( fr_i(ji,jj) - sf_ssi(1)%fnow(ji,jj,1) )*100.0
-								qns_oce (ji,jj)= qns_oce (ji,jj) + zqrp_freez
-                            ELSE IF	((fr_i(ji,jj)*100)>90) THEN !if ice concetration is 100%, check thickness
-                                
-								IF (sf_ssit(1)%fnow(ji,jj,1) == sf_ssit(1)%fnow(ji,jj,1)) THEN!If thickness reanalysis value not NAN
-                                    icethic_temporary = SUM(ht_i(ji,jj,:)*a_i_b(ji,jj,:))
-                                    
-									tmp_thic_diff = ((icethic_temporary - sf_ssit(1)%fnow(ji,jj,1) ))
-									IF (ABS(tmp_thic_diff) > 0.1 .AND. (tmp_thic_diff)<0.0 ) THEN !if ice must be thickness-freezed 
-										IF (sf_ssit(1)%fnow(ji,jj,1) > 1) THEN
-											tmp_thic_diff = (( icethic_temporary - 1 ))
-										ENDIF
-										zqrp_freez = rn_dqdi_freez * ( tmp_thic_diff )*4*100.0
-										qsr_ice (ji,jj,:)= qsr_ice (ji,jj,:) + zqrp_freez
-									ENDIF
-								ENDIF
+							IF (ABS(tmp_thic_diff)>thic_error .AND. (tmp_thic_diff<0.0) ) THEN !if ice must be thickness-freezed 
+								zqrp_freez = rn_dqdi_thick_freez * (tmp_thic_diff )*100.0
+								qsr_ice (ji,jj,:)= qsr_ice (ji,jj,:) + zqrp_freez*ice_resto
 							ENDIF
-						ENDIF
+							
+							IF (ABS(tmp_thic_diff)>thic_error .AND. (tmp_thic_diff>0.0) ) THEN !if ice must be thickness-melted 
+								zqrp_melt = rn_dqdi_thick_melt * (tmp_thic_diff )*100.0
+								qsr_ice (ji,jj,:)= qsr_ice (ji,jj,:) + zqrp_melt*ice_resto
+							ENDIF
+					!ELSE
+					!	WRITE(*,*) "Thic rest scipped"
+					ENDIF
+					
                   END DO
                END DO
             ENDIF
 			
-			!ADDED AH (28.09)
+		!ADDED AH (28.09)
 		 DO jj = 1, jpj
                    DO ji = 1, jpi
 				   icethi = SUM(ht_i(ji,jj,:)*a_i_b(ji,jj,:))
@@ -302,10 +335,11 @@ CONTAINS
       REAL(wp) ::   zsrp     ! local scalar for unit conversion of rn_deds factor
       REAL(wp) ::   zerp_bnd ! local scalar for unit conversion of rn_epr_max factor
       INTEGER  ::   ierror   ! return error code
+	  INTEGER  ::   inum
       !!
       CHARACTER(len=100) ::  cn_dir          ! Root directory for location of ssr files
-      TYPE(FLD_N) ::   sn_sst, sn_sss, sn_ssi, sn_ssit        ! informations about the fields to be read
-      NAMELIST/namsbc_ssr/ cn_dir, nn_sstr, nn_ssir, nn_sssr, rn_dqdt, rn_dqdi, rn_dqdi_freez, rn_deds, sn_sst, sn_sss, sn_ssi,sn_ssit, ln_sssr_bnd, rn_sssr_bnd
+      TYPE(FLD_N) ::   sn_sst, sn_sss, sn_ssi, sn_ssit,sn_ssit_error,sn_resto        ! informations about the fields to be read
+      NAMELIST/namsbc_ssr/ cn_dir, nn_sstr, nn_ssir, nn_sssr, rn_dqdt, rn_dqdi_melt, rn_dqdi_freez,rn_dqdi_thick_melt, rn_dqdi_thick_freez, rn_deds, sn_sst, sn_sss, sn_ssi,sn_ssit,sn_ssit_error,sn_resto, ln_sssr_bnd, rn_sssr_bnd
       INTEGER     ::  ios
       !!----------------------------------------------------------------------
       !
@@ -329,8 +363,10 @@ CONTAINS
          WRITE(numout,*) '      SSS damping term (Yes=1, salt flux)    nn_sssr     = ', nn_sssr
          WRITE(numout,*) '                       (Yes=2, volume flux) '
          WRITE(numout,*) '      dQ/dT (restoring magnitude on SST)     rn_dqdt     = ', rn_dqdt, ' W/m2/K'
-		 WRITE(numout,*) '      dQ/d% (restoring magnitude on SSI)     rn_dqdi     = ', rn_dqdi, ' W/m2/%' 
+		 WRITE(numout,*) '      dQ/d% (restoring magnitude on SSI)     rn_dqdi_melt     = ', rn_dqdi_melt, ' W/m2/%' 
 		 WRITE(numout,*) '      dQ/d% (restoring magnitude on SSI)     rn_dqdi_freez     = ', rn_dqdi_freez, ' W/m2/%'
+		 WRITE(numout,*) '      dQ/dTh (restoring magnitude on SSI)     rn_dqdi_thick_melt     = ', rn_dqdi_thick_melt, ' W/m2/%' 
+		 WRITE(numout,*) '      dQ/dTh (restoring magnitude on SSI)     rn_dqdi_thick_freez     = ', rn_dqdi_thick_freez, ' W/m2/%'
          WRITE(numout,*) '      dE/dS (restoring magnitude on SSS)     rn_deds     = ', rn_deds, ' mm/day'
          WRITE(numout,*) '      flag to bound erp term                 ln_sssr_bnd = ', ln_sssr_bnd
          WRITE(numout,*) '      ABS(Max./Min.) erp threshold           rn_sssr_bnd = ', rn_sssr_bnd, ' mm/day'
@@ -372,11 +408,30 @@ CONTAINS
          IF( ierror > 0 )   CALL ctl_stop( 'STOP', 'sbc_ssr: unable to allocate sf_ssi structure' )
          ALLOCATE( sf_ssit(1)%fnow(jpi,jpj,1), STAT=ierror )
          IF( ierror > 0 )   CALL ctl_stop( 'STOP', 'sbc_ssr: unable to allocate sf_ssi now array' )
+		 
+		 ALLOCATE( sf_ssit_error(1), STAT=ierror )
+         IF( ierror > 0 )   CALL ctl_stop( 'STOP', 'sbc_ssr: unable to allocate sf_ssit_error structure' )
+         ALLOCATE( sf_ssit_error(1)%fnow(jpi,jpj,1), STAT=ierror )
+         IF( ierror > 0 )   CALL ctl_stop( 'STOP', 'sbc_ssr: unable to allocate sf_ssit_error now array' )
+		 
+		 ALLOCATE( sf_resto(1), STAT=ierror )
+         IF( ierror > 0 )   CALL ctl_stop( 'STOP', 'sbc_ssr: unable to allocate sf_resto structure' )
+         ALLOCATE( sf_resto(1)%fnow(jpi,jpj,1), STAT=ierror )
+         IF( ierror > 0 )   CALL ctl_stop( 'STOP', 'sbc_ssr: unable to allocate sf_resto now array' )
          !
-         ! fill sf_ssit with sn_ssi and control print
+         ! fill sf_ssit with sn_ssit and control print
          CALL fld_fill( sf_ssit, (/ sn_ssit /), cn_dir, 'sbc_ssr', 'SSI restoring term toward SSI data', 'namsbc_ssr' )
          IF( sf_ssit(1)%ln_tint )   ALLOCATE( sf_ssit(1)%fdta(jpi,jpj,1,2), STAT=ierror )
          IF( ierror > 0 )   CALL ctl_stop( 'STOP', 'sbc_ssr: unable to allocate sf_ssit data array' )
+		 
+		 CALL fld_fill( sf_ssit_error, (/ sn_ssit_error /), cn_dir, 'sbc_ssr', 'SSI error for SSI restoring term', 'namsbc_ssr' )
+         IF( sf_ssit(1)%ln_tint )   ALLOCATE( sf_ssit_error(1)%fdta(jpi,jpj,1,2), STAT=ierror )
+         IF( ierror > 0 )   CALL ctl_stop( 'STOP', 'sbc_ssr: unable to allocate sf_ssit_error data array' )
+		 
+		 CALL fld_fill( sf_resto, (/ sn_resto /), cn_dir, 'sbc_ssr', 'Resto mask restoring term toward resto mask data', 'namsbc_ssr' )
+         IF( sf_resto(1)%ln_tint )   ALLOCATE( sf_resto(1)%fdta(jpi,jpj,1,2), STAT=ierror )
+         IF( ierror > 0 )   CALL ctl_stop( 'STOP', 'sbc_ssr: unable to allocate sf_resto data array' )
+		 
          !
       ENDIF
 # endif

@@ -68,12 +68,10 @@ CONTAINS
             CALL bdy_tra_orlanski( idx_bdy(ib_bdy), dta_bdy(ib_bdy), ll_npo=.false. )
          CASE('orlanski_npo')
             CALL bdy_tra_orlanski( idx_bdy(ib_bdy), dta_bdy(ib_bdy), ll_npo=.true. )
-		 CASE('orlanski_npo_frs')!(ADDED AH 30.06.2017)
-            CALL bdy_tra_orlanski_frs( idx_bdy(ib_bdy), dta_bdy(ib_bdy), ll_npo=.true. )
 		 CASE('adv_frs') !(ADDED AH 03.07.2017)
-            CALL bdy_tra_adv( idx_bdy(ib_bdy), dta_bdy(ib_bdy),ll_frs=.true.)	
+            CALL bdy_tra_adv_frs( idx_bdy(ib_bdy), dta_bdy(ib_bdy))	
 		 CASE('adv') !(ADDED AH 03.07.2017)
-			CALL bdy_tra_adv( idx_bdy(ib_bdy), dta_bdy(ib_bdy),ll_frs=.false.)	
+			CALL bdy_tra_adv( idx_bdy(ib_bdy), dta_bdy(ib_bdy))	
          CASE('runoff')
             CALL bdy_tra_rnf( idx_bdy(ib_bdy), dta_bdy(ib_bdy), kt )
          CASE DEFAULT
@@ -84,7 +82,7 @@ CONTAINS
          CALL lbc_bdy_lnk( tsa(:,:,:,jp_sal), 'T', 1., ib_bdy )
       ENDDO
 	  
-	  IF( ln_rnf ) THEN         ! input of heat and salt due to river runoff 
+	  IF (( ln_rnf ) .AND. (ln_rnf_forced)) THEN         ! input of heat and salt due to river runoff 
          DO jj = 2, jpj 
             DO ji = 2, jpi
 				DO jk = 2, jpkm1
@@ -285,7 +283,7 @@ CONTAINS
    END SUBROUTINE bdy_tra_orlanski
    
    
-      SUBROUTINE bdy_tra_orlanski_frs( idx, dta, ll_npo )
+      SUBROUTINE bdy_tra_adv_frs( idx, dta)
       !!----------------------------------------------------------------------
       !!                 ***  SUBROUTINE bdy_tra_orlanski  ***
       !!             
@@ -297,7 +295,6 @@ CONTAINS
       !!----------------------------------------------------------------------
       TYPE(OBC_INDEX),              INTENT(in) ::   idx  ! OBC indices
       TYPE(OBC_DATA),               INTENT(in) ::   dta  ! OBC external data
-      LOGICAL,                      INTENT(in) ::   ll_npo  ! switch for NPO version
 
       INTEGER  ::   igrd                                    ! grid index
       !!----------------------------------------------------------------------
@@ -306,21 +303,21 @@ CONTAINS
       !
       igrd = 1      ! Orlanski bc on temperature; 
       !            
-      CALL bdy_orlanski_3d_frs_mod( idx, igrd, tsb(:,:,:,jp_tem), tsa(:,:,:,jp_tem), dta%tem, ll_npo )
+      CALL bdy_adv_frs_mod( idx, igrd, tsb(:,:,:,jp_tem), tsa(:,:,:,jp_tem), dta%tem )
 
       igrd = 1      ! Orlanski bc on salinity;
       !  
-      CALL bdy_orlanski_3d_frs_mod( idx, igrd, tsb(:,:,:,jp_sal), tsa(:,:,:,jp_sal), dta%sal, ll_npo )
+      CALL bdy_adv_frs_mod( idx, igrd, tsb(:,:,:,jp_sal), tsa(:,:,:,jp_sal), dta%sal )
       !
       IF( nn_timing == 1 ) CALL timing_stop('bdy_tra_orlanski')
       !
 
-   END SUBROUTINE bdy_tra_orlanski_frs
+   END SUBROUTINE bdy_tra_adv_frs
    
    
    
    
-      SUBROUTINE bdy_tra_adv( idx, dta, ll_frs)
+      SUBROUTINE bdy_tra_adv( idx, dta)
       !!----------------------------------------------------------------------
       !!                 ***  SUBROUTINE bdy_tra_orlanski  ***
       !!             
@@ -332,7 +329,6 @@ CONTAINS
       !!----------------------------------------------------------------------
       TYPE(OBC_INDEX),              INTENT(in) ::   idx  ! OBC indices
       TYPE(OBC_DATA),               INTENT(in) ::   dta  ! OBC external data
-	  LOGICAL,                      INTENT(in) ::   ll_frs  ! switch for FRS version
       INTEGER  ::   igrd                                    ! grid index
       !!----------------------------------------------------------------------
 
@@ -340,11 +336,11 @@ CONTAINS
       !
       igrd = 1      ! Orlanski bc on temperature; 
       !            
-      CALL bdy_adv( idx, igrd, tsb(:,:,:,jp_tem), tsa(:,:,:,jp_tem), dta%tem,ll_frs)
+      CALL bdy_adv( idx, igrd, tsb(:,:,:,jp_tem), tsa(:,:,:,jp_tem), dta%tem)
 
       igrd = 1      ! Orlanski bc on salinity;
       !  
-      CALL bdy_adv( idx, igrd, tsb(:,:,:,jp_sal), tsa(:,:,:,jp_sal), dta%sal,ll_frs)
+      CALL bdy_adv( idx, igrd, tsb(:,:,:,jp_sal), tsa(:,:,:,jp_sal), dta%sal)
       !
       IF( nn_timing == 1 ) CALL timing_stop('bdy_tra_orlanski')
       !

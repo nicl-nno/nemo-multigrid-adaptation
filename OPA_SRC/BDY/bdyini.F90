@@ -282,10 +282,6 @@ CONTAINS
              IF(lwp) WRITE(numout,*) '      Orlanski (NPO) radiation condition with adaptive nudging'
              dta_bdy(ib_bdy)%ll_tem = .true.
              dta_bdy(ib_bdy)%ll_sal = .true.
-		  CASE('orlanski_npo_frs') !(ADDED AH 30.06.2017)
-             IF(lwp) WRITE(numout,*) '      Orlanski (NPO) radiation condition with FRS inflow'
-             dta_bdy(ib_bdy)%ll_tem = .true.
-             dta_bdy(ib_bdy)%ll_sal = .true.
 		  CASE('adv_frs') !(ADDED AH 03.07.2017)
              IF(lwp) WRITE(numout,*) ' ADVection scheme outflow with FRS inflow conditions'
              dta_bdy(ib_bdy)%ll_tem = .true.
