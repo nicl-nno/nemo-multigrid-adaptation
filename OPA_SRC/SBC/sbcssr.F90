@@ -59,7 +59,7 @@ MODULE sbcssr
    LOGICAL         ::   ln_sssr_bnd     ! flag to bound erp term 
    REAL(wp)        ::   rn_sssr_bnd     ! ABS(Max./Min.) value of erp term [mm/day]
    
-   REAL(wp) :: ice_resto
+   REAL(wp) :: ice_resto,ice_resto_conc,ice_resto_thic,ice_resto_mask
 
    REAL(wp) , ALLOCATABLE, DIMENSION(:) ::   buffer   ! Temporary buffer for exchange
    TYPE(FLD), ALLOCATABLE, DIMENSION(:) ::   sf_sst   ! structure of input SST (file informations, fields read)
@@ -235,7 +235,7 @@ CONTAINS
       IF( nn_ssir /= 0 ) THEN
          !
 		 IF( nn_ssir == 1)   CALL fld_read( kt, nn_fsbc, sf_ssi )   ! Read SSI conc data and provides it at kt
-		 IF( nn_ssir == 1)   CALL fld_read( kt, nn_fsbc, sf_ssit )   ! Read SSI thinckness data and provides it at kt
+		 IF( nn_ssir == 1)   CALL fld_read( kt, nn_fsbc, sf_ssit )   ! Read SSI thickness data and provides it at kt
 		 IF( nn_ssir == 1)   CALL fld_read( kt, nn_fsbc, sf_ssit_error )   ! Read SSI thinckness error data and provides it at kt
 		 IF( nn_ssir == 1)   CALL fld_read( kt, nn_fsbc, sf_resto )   ! Read SST data and provides it at kt
 
@@ -249,54 +249,65 @@ CONTAINS
 			IF( nn_ssir == 1 ) THEN  !* Ice concentration restoring term
 			   DO jj = 1, jpj
 				  DO ji = 1, jpi
-				  
-				  ice_conc_diff=((( fr_i(ji,jj) - sf_ssi(1)%fnow(ji,jj,1)/100 )*100.0))
+				  ! Skip all NANs
+					ice_resto_mask=sf_resto(1)%fnow(ji,jj,1)
+					IF (ice_resto_mask .NE. ice_resto_mask) THEN
+						CONTINUE
+					ENDIF
+					ice_resto_conc=sf_ssi(1)%fnow(ji,jj,1)
+					IF (ice_resto_conc .NE. ice_resto_conc) THEN
+						CONTINUE
+					ENDIF
+					ice_resto_thic=sf_ssit(1)%fnow(ji,jj,1)
+					! If conc ok, we skip only thickness resto
+					IF (ice_resto_thic .NE. ice_resto_thic) THEN
+						ice_resto_thic=0
+					ENDIF
+					IF (ice_resto_mask > 1) THEN
+						ice_resto_mask=0
+					ENDIF
+				  ice_conc_diff=((( fr_i(ji,jj) - ice_resto_conc/100 )*100.0))
 				  abs_ice_conc_diff=ABS(ice_conc_diff)
 
-				  
-					! If conentration reanalysis value not NAN
-					ice_resto=sf_resto(1)%fnow(ji,jj,1)
-					
-					IF (sf_ssi(1)%fnow(ji,jj,1) == sf_ssi(1)%fnow(ji,jj,1)) THEN 
 						IF (abs_ice_conc_diff > 10.0 .AND. ice_conc_diff>0.0 ) THEN !if ice must be melted
 							 zqrp_melt = rn_dqdi_melt * ice_conc_diff
-							 qsr_ice(ji,jj,:) = qsr_ice(ji,jj,:) + zqrp_melt*ice_resto
+							 qsr_ice(ji,jj,:) = qsr_ice(ji,jj,:) + zqrp_melt*ice_resto_mask
 						ENDIF
 						
 						IF (abs_ice_conc_diff > 5.0 .AND. ice_conc_diff<0.0 ) THEN !if ice must be freezed
 							zqrp_freez = rn_dqdi_freez * ice_conc_diff
-							qns_oce (ji,jj)= qns_oce (ji,jj) + zqrp_freez*ice_resto
+							qns_oce (ji,jj)= qns_oce (ji,jj) + zqrp_freez*ice_resto_mask
 						ENDIF
-					ENDIF
+
 					
-					IF (sf_ssit(1)%fnow(ji,jj,1) == sf_ssit(1)%fnow(ji,jj,1) .AND. (sf_ssit(1)%fnow(ji,jj,1)>0.01)) THEN!If thickness reanalysis value not NAN
+					IF (ice_resto_thic>0.05) THEN
 							icethic_temporary = SUM(ht_i(ji,jj,:)*a_i_b(ji,jj,:))
 							
-							tmp_thic_diff = ((icethic_temporary - sf_ssit(1)%fnow(ji,jj,1) ))
-							thic_error=sf_ssit_error(1)%fnow(ji,jj,1)/2
-							!WRITE(*,*) "Thic_error",ji,jj,thic_error,tmp_thic_diff,sf_ssit(1)%fnow(ji,jj,1)
+							tmp_thic_diff = ((icethic_temporary - ice_resto_thic ))
+							thic_error=sf_ssit_error(1)%fnow(ji,jj,1)
 							IF (ABS(thic_error)<0.1 .OR. (thic_error .NE. thic_error) .OR. (thic_error<0.01)) THEN 
 								thic_error=0.1 
 							ENDIF
 							
+							zqrp_freez=0
+							zqrp_melt=0
+						IF ((abs_ice_conc_diff<0.1) .AND. (fr_i(ji,jj)>0.7)) THEN
 							IF (ABS(tmp_thic_diff)>thic_error .AND. (tmp_thic_diff<0.0) ) THEN !if ice must be thickness-freezed 
 								zqrp_freez = rn_dqdi_thick_freez * (tmp_thic_diff )*100.0
-								qsr_ice (ji,jj,:)= qsr_ice (ji,jj,:) + zqrp_freez*ice_resto
+								qsr_ice (ji,jj,:)= qsr_ice (ji,jj,:) + zqrp_freez*ice_resto_mask
 							ENDIF
 							
 							IF (ABS(tmp_thic_diff)>thic_error .AND. (tmp_thic_diff>0.0) ) THEN !if ice must be thickness-melted 
 								zqrp_melt = rn_dqdi_thick_melt * (tmp_thic_diff )*100.0
-								qsr_ice (ji,jj,:)= qsr_ice (ji,jj,:) + zqrp_melt*ice_resto
+								qsr_ice (ji,jj,:)= qsr_ice (ji,jj,:) + zqrp_melt*ice_resto_mask
 							ENDIF
-					!ELSE
-					!	WRITE(*,*) "Thic rest scipped"
+							ENDIF
 					ENDIF
 					
                   END DO
                END DO
             ENDIF
 			
-		!ADDED AH (28.09)
 		 DO jj = 1, jpj
                    DO ji = 1, jpi
 				   icethi = SUM(ht_i(ji,jj,:)*a_i_b(ji,jj,:))
